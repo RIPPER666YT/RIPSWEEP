@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Кооперативный Сапёр (Firebase)</title>
+    <title>Кооперативный Сапёр</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -55,6 +55,7 @@
             margin: 10px 0;
             font-size: 18px;
             font-weight: bold;
+            min-height: 24px;
         }
         #player-list {
             margin: 20px auto;
@@ -76,6 +77,10 @@
         }
         button:hover {
             background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
         }
         .color-indicator {
             display: inline-block;
@@ -99,9 +104,26 @@
             margin: 10px 0;
             box-sizing: border-box;
         }
-        #game-id-input {
+        #game-id-display {
             font-family: monospace;
-            text-align: center;
+            font-size: 18px;
+            margin: 15px 0;
+            padding: 8px;
+            background-color: #f8f8f8;
+            border-radius: 4px;
+            word-break: break-all;
+        }
+        #game-info {
+            margin: 20px auto;
+            max-width: 300px;
+            background-color: #fff;
+            padding: 15px;
+            border-radius: 5px;
+            box-shadow: 0 0 5px rgba(0,0,0,0.2);
+        }
+        .player-turn {
+            font-weight: bold;
+            color: #2E7D32;
         }
     </style>
 </head>
@@ -117,15 +139,19 @@
         <div id="game-actions" style="display: none; margin-top: 20px;">
             <button id="create-game-btn">Создать игру</button>
             <div style="margin: 10px 0;">или</div>
-            <input type="text" id="game-id-input" placeholder="ID игры">
+            <input type="text" id="game-id-input" placeholder="Введите ID игры">
             <button id="join-game-btn">Присоединиться</button>
         </div>
     </div>
     
     <div id="game-area" style="display: none;">
-        <div id="controls">
-            <button id="new-game-btn">Новая игра</button>
+        <div id="game-info">
+            <div>ID игры: <span id="game-id-display"></span></div>
             <div id="status">Ожидание начала игры...</div>
+        </div>
+        
+        <div id="controls">
+            <button id="new-game-btn" disabled>Новая игра</button>
         </div>
         
         <div id="game-container">
@@ -149,7 +175,7 @@
             authDomain: "ripsweep-1aaaf.firebaseapp.com",
             databaseURL: "https://ripsweep-1aaaf-default-rtdb.firebaseio.com",
             projectId: "ripsweep-1aaaf",
-            storageBucket: "ripsweep-1aaaf.firebasestorage.app",
+            storageBucket: "ripsweep-1aaaf.appspot.com",
             messagingSenderId: "600546881732",
             appId: "1:600546881732:web:e3e8f2c2980c583e3e5991",
             measurementId: "G-HS9JT49X7R"
@@ -176,7 +202,8 @@
             gameWon: false,
             players: {},
             currentPlayerId: null,
-            gameId: null
+            gameId: null,
+            creatorId: null
         };
         
         // Текущий игрок
@@ -200,6 +227,8 @@
         const createGameBtn = document.getElementById('create-game-btn');
         const joinGameBtn = document.getElementById('join-game-btn');
         const gameIdInput = document.getElementById('game-id-input');
+        const gameIdDisplay = document.getElementById('game-id-display');
+        const gameInfo = document.getElementById('game-info');
         
         // Цвета для игроков
         const playerColors = [
@@ -240,7 +269,7 @@
                 }
             }
             
-            statusElement.textContent = 'Ожидание начала игры...';
+            statusElement.textContent = 'Ожидание первого хода...';
         }
         
         // Генерация мин
@@ -445,14 +474,21 @@
                 colorIndicator.style.backgroundColor = player.color;
                 
                 li.appendChild(colorIndicator);
-                li.appendChild(document.createTextNode(player.name));
                 
+                const playerNameSpan = document.createElement('span');
+                playerNameSpan.textContent = player.name;
                 if (id === gameState.currentPlayerId) {
-                    li.innerHTML += ' (ход)';
+                    playerNameSpan.classList.add('player-turn');
                 }
+                
+                li.appendChild(playerNameSpan);
                 
                 if (id === currentPlayer.id) {
                     li.innerHTML += ' (Вы)';
+                }
+                
+                if (id === gameState.creatorId) {
+                    li.innerHTML += ' (Создатель)';
                 }
                 
                 playersList.appendChild(li);
@@ -469,8 +505,23 @@
             gameState.currentPlayerId = playerIds[nextIndex];
             
             updatePlayersList();
-            statusElement.textContent = gameState.currentPlayerId === currentPlayer.id ? 
-                'Ваш ход!' : `Ход игрока ${gameState.players[gameState.currentPlayerId].name}`;
+            updateStatus();
+            updateGameState();
+        }
+        
+        // Обновление статуса игры
+        function updateStatus() {
+            if (gameState.gameOver) {
+                statusElement.textContent = 'Игра окончена! Вы проиграли.';
+            } else if (gameState.gameWon) {
+                statusElement.textContent = 'Поздравляем! Вы победили!';
+            } else {
+                if (gameState.currentPlayerId === currentPlayer.id) {
+                    statusElement.textContent = 'Ваш ход!';
+                } else {
+                    statusElement.textContent = `Ход игрока ${gameState.players[gameState.currentPlayerId].name}`;
+                }
+            }
         }
         
         // Обновление состояния игры в Firebase
@@ -484,7 +535,8 @@
                 gameOver: gameState.gameOver,
                 gameWon: gameState.gameWon,
                 players: gameState.players,
-                currentPlayerId: gameState.currentPlayerId
+                currentPlayerId: gameState.currentPlayerId,
+                creatorId: gameState.creatorId
             });
         }
         
@@ -493,6 +545,7 @@
             gameState.gameId = 'game_' + Date.now();
             currentPlayer.id = 'player_' + Date.now();
             currentPlayer.color = playerColors[0];
+            gameState.creatorId = currentPlayer.id;
             
             gameState.players = {
                 [currentPlayer.id]: {
@@ -502,17 +555,20 @@
             };
             gameState.currentPlayerId = currentPlayer.id;
             
+            // Показываем ID игры
+            gameIdDisplay.textContent = gameState.gameId;
+            
+            // Разрешаем создателю начинать новую игру
+            newGameBtn.disabled = false;
+            
             // Создаем игру в Firebase
             updateGameState();
-            
-            // Показываем ID игры для присоединения
-            gameIdInput.value = gameState.gameId;
             
             // Инициализируем игру
             initGame();
             gameArea.style.display = 'block';
             nicknameContainer.style.display = 'none';
-            statusElement.textContent = 'Ваш ход!';
+            updateStatus();
             updatePlayersList();
             
             // Слушаем изменения в игре
@@ -526,19 +582,12 @@
                     gameState.gameWon = data.gameWon || false;
                     gameState.players = data.players || gameState.players;
                     gameState.currentPlayerId = data.currentPlayerId || gameState.currentPlayerId;
+                    gameState.creatorId = data.creatorId || gameState.creatorId;
                     
                     // Обновляем UI
                     updateBoardUI();
                     updatePlayersList();
-                    
-                    if (gameState.gameOver) {
-                        statusElement.textContent = 'Игра окончена! Вы проиграли.';
-                    } else if (gameState.gameWon) {
-                        statusElement.textContent = 'Поздравляем! Вы победили!';
-                    } else {
-                        statusElement.textContent = gameState.currentPlayerId === currentPlayer.id ? 
-                            'Ваш ход!' : `Ход игрока ${gameState.players[gameState.currentPlayerId].name}`;
-                    }
+                    updateStatus();
                 }
             });
         }
@@ -547,7 +596,6 @@
         function joinGame(gameId) {
             gameState.gameId = gameId;
             currentPlayer.id = 'player_' + Date.now();
-            currentPlayer.color = playerColors[Object.keys(gameState.players).length % playerColors.length];
             
             // Получаем данные игры
             database.ref(`games/${gameId}`).once('value').then((snapshot) => {
@@ -566,12 +614,25 @@
                 gameState.gameWon = data.gameWon || false;
                 gameState.players = data.players || {};
                 gameState.currentPlayerId = data.currentPlayerId || null;
+                gameState.creatorId = data.creatorId || null;
+                
+                // Выбираем цвет для нового игрока
+                const playerCount = Object.keys(gameState.players).length;
+                currentPlayer.color = playerColors[playerCount % playerColors.length];
                 
                 // Добавляем текущего игрока в игру
                 gameState.players[currentPlayer.id] = {
                     name: currentPlayer.name,
                     color: currentPlayer.color
                 };
+                
+                // Показываем ID игры
+                gameIdDisplay.textContent = gameState.gameId;
+                
+                // Запрещаем присоединившемуся начинать новую игру
+                newGameBtn.disabled = true;
+                
+                // Обновляем игру в Firebase
                 updateGameState();
                 
                 // Инициализируем игру
@@ -580,15 +641,7 @@
                 nicknameContainer.style.display = 'none';
                 updateBoardUI();
                 updatePlayersList();
-                
-                if (gameState.gameOver) {
-                    statusElement.textContent = 'Игра окончена! Вы проиграли.';
-                } else if (gameState.gameWon) {
-                    statusElement.textContent = 'Поздравляем! Вы победили!';
-                } else {
-                    statusElement.textContent = gameState.currentPlayerId === currentPlayer.id ? 
-                        'Ваш ход!' : `Ход игрока ${gameState.players[gameState.currentPlayerId].name}`;
-                }
+                updateStatus();
                 
                 // Слушаем изменения в игре
                 database.ref(`games/${gameId}`).on('value', (snapshot) => {
@@ -601,19 +654,12 @@
                         gameState.gameWon = data.gameWon || false;
                         gameState.players = data.players || gameState.players;
                         gameState.currentPlayerId = data.currentPlayerId || gameState.currentPlayerId;
+                        gameState.creatorId = data.creatorId || gameState.creatorId;
                         
                         // Обновляем UI
                         updateBoardUI();
                         updatePlayersList();
-                        
-                        if (gameState.gameOver) {
-                            statusElement.textContent = 'Игра окончена! Вы проиграли.';
-                        } else if (gameState.gameWon) {
-                            statusElement.textContent = 'Поздравляем! Вы победили!';
-                        } else {
-                            statusElement.textContent = gameState.currentPlayerId === currentPlayer.id ? 
-                                'Ваш ход!' : `Ход игрока ${gameState.players[gameState.currentPlayerId].name}`;
-                        }
+                        updateStatus();
                     }
                 });
             });
@@ -657,7 +703,7 @@
         });
         
         newGameBtn.addEventListener('click', () => {
-            if (!gameState.gameId) return;
+            if (!gameState.gameId || currentPlayer.id !== gameState.creatorId) return;
             
             // Сброс состояния игры
             gameState.board = Array(config.rows).fill().map(() => Array(config.cols).fill(0));
@@ -667,12 +713,11 @@
             gameState.gameWon = false;
             
             // Первый ход - создатель игры
-            gameState.currentPlayerId = Object.keys(gameState.players)[0];
+            gameState.currentPlayerId = gameState.creatorId;
             
             updateGameState();
             initGame();
-            statusElement.textContent = gameState.currentPlayerId === currentPlayer.id ? 
-                'Ваш ход!' : `Ход игрока ${gameState.players[gameState.currentPlayerId].name}`;
+            updateStatus();
         });
     </script>
 </body>
