@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Кооперативный Сапёр (Firebase)</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background-color: #f0f0f0;
+            margin: 0;
+            padding: 20px;
+        }
+        #game-container {
+            display: inline-block;
+            margin-top: 20px;
+            background-color: #bbb;
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.3);
+        }
+        #board {
+            display: grid;
+            grid-template-columns: repeat(10, 30px);
+            grid-gap: 2px;
+            margin: 0 auto;
+        }
+        .cell {
+            width: 30px;
+            height: 30px;
+            background-color: #ddd;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 14px;
+            user-select: none;
+            position: relative;
+        }
+        .cell.revealed {
+            background-color: #eee;
+        }
+        .cell.mine {
+            background-color: #ff9999;
+        }
+        .cell.flagged {
+            background-color: #99ccff;
+        }
+        #controls {
+            margin: 20px 0;
+        }
+        #status {
+            margin: 10px 0;
+            font-size: 18px;
+            font-weight: bold;
+        }
+        #player-list {
+            margin: 20px auto;
+            max-width: 300px;
+            background-color: #fff;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 0 5px rgba(0,0,0,0.2);
+        }
+        button {
+            padding: 8px 15px;
+            margin: 0 5px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .color-indicator {
+            display: inline-block;
+            width: 15px;
+            height: 15px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+        #auth-container {
+            margin: 20px auto;
+            max-width: 300px;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 0 5px rgba(0,0,0,0.2);
+        }
+        input {
+            display: block;
+            width: 100%;
+            padding: 8px;
+            margin: 10px 0;
+            box-sizing: border-box;
+        }
+        #game-id-input {
+            font-family: monospace;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <h1>Кооперативный Сапёр</h1>
+    
+    <div id="auth-container">
+        <h3>Вход / Регистрация</h3>
+        <input type="email" id="email" placeholder="Email">
+        <input type="password" id="password" placeholder="Пароль">
+        <button id="login-btn">Войти</button>
+        <button id="signup-btn">Зарегистрироваться</button>
+        <div id="auth-status"></div>
+        
+        <h3 style="margin-top: 20px;">Игра</h3>
+        <button id="create-game-btn">Создать игру</button>
+        <div style="margin: 10px 0;">или</div>
+        <input type="text" id="game-id-input" placeholder="ID игры">
+        <button id="join-game-btn">Присоединиться</button>
+    </div>
+    
+    <div id="game-area" style="display: none;">
+        <div id="controls">
+            <button id="new-game-btn">Новая игра</button>
+            <div id="status">Ожидание начала игры...</div>
+        </div>
+        
+        <div id="game-container">
+            <div id="board"></div>
+        </div>
+        
+        <div id="player-list">
+            <h3>Игроки:</h3>
+            <ul id="players"></ul>
+        </div>
+    </div>
+
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-database-compat.js"></script>
+
+    <script>
+        // Firebase configuration - ЗАМЕНИТЕ НА СВОЮ КОНФИГУРАЦИЮ
+        const firebaseConfig = {
+            apiKey: "AIzaSyDEXAMPLEEXAMPLEEXAMPLEEXAMPLE",
+            authDomain: "your-project-id.firebaseapp.com",
+            databaseURL: "https://your-project-id.firebaseio.com",
+            projectId: "your-project-id",
+            storageBucket: "your-project-id.appspot.com",
+            messagingSenderId: "123456789012",
+            appId: "1:123456789012:web:abc123abc123abc123abc123"
+        };
+
+        // Initialize Firebase
+        const app = firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const database = firebase.database();
+
+        // Конфигурация игры
+        const config = {
+            rows: 10,
+            cols: 10,
+            mines: 15,
+            cellSize: 30
+        };
+        
+        // Состояние игры
+        let gameState = {
+            board: [],
+            revealed: [],
+            flagged: [],
+            gameOver: false,
+            gameWon: false,
+            players: {},
+            currentPlayerId: null,
+            gameId: null
+        };
+        
+        // Текущий пользователь
+        let currentUser = null;
+        
+        // Элементы DOM
+        const authContainer = document.getElementById('auth-container');
+        const gameArea = document.getElementById('game-area');
+        const boardElement = document.getElementById('board');
+        const statusElement = document.getElementById('status');
+        const newGameBtn = document.getElementById('new-game-btn');
+        const playersList = document.getElementById('players');
+        const emailInput = document.getElementById('email');
+        const passwordInput = document.getElementById('password');
+        const loginBtn = document.getElementById('login-btn');
+        const signupBtn = document.getElementById('signup-btn');
+        const authStatus = document.getElementById('auth-status');
+        const createGameBtn = document.getElementById('create-game-btn');
+        const joinGameBtn = document.getElementById('join-game-btn');
+        const gameIdInput = document.getElementById('game-id-input');
+        
+        // Цвета для игроков
+        const playerColors = [
+            '#FF5252', '#FF4081', '#E040FB', '#7C4DFF', 
+            '#536DFE', '#448AFF', '#40C4FF', '#18FFFF', 
+            '#64FFDA', '#69F0AE', '#B2FF59', '#EEFF41', 
+            '#FFFF00', '#FFD740', '#FFAB40', '#FF6E40'
+        ];
+        
+        // Инициализация игры
+        function initGame() {
+            // Очистка доски
+            boardElement.innerHTML = '';
+            boardElement.style.gridTemplateColumns = `repeat(${config.cols}, ${config.cellSize}px)`;
+            
+            // Инициализация состояния
+            gameState.board = Array(config.rows).fill().map(() => Array(config.cols).fill(0));
+            gameState.revealed = Array(config.rows).fill().map(() => Array(config.cols).fill(false));
+            gameState.flagged = Array(config.rows).fill().map(() => Array(config.cols).fill(false));
+            gameState.gameOver = false;
+            gameState.gameWon = false;
+            
+            // Создание доски
+            for (let row = 0; row < config.rows; row++) {
+                for (let col = 0; col < config.cols; col++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    cell.dataset.row = row;
+                    cell.dataset.col = col;
+                    
+                    cell.addEventListener('click', () => handleCellClick(row, col));
+                    cell.addEventListener('contextmenu', (e) => {
+                        e.preventDefault();
+                        handleCellRightClick(row, col);
+                    });
+                    
+                    boardElement.appendChild(cell);
+                }
+            }
+            
+            statusElement.textContent = 'Ожидание начала игры...';
+        }
+        
+        // Генерация мин
+        function generateMines(firstClickRow, firstClickCol) {
+            let minesPlaced = 0;
+            
+            while (minesPlaced < config.mines) {
+                const row = Math.floor(Math.random() * config.rows);
+                const col = Math.floor(Math.random() * config.cols);
+                
+                // Не ставим мину на первую нажатую клетку и вокруг неё
+                if ((row === firstClickRow && col === firstClickCol) || 
+                    (Math.abs(row - firstClickRow) <= 1 && Math.abs(col - firstClickCol) <= 1)) {
+                    continue;
+                }
+                
+                if (gameState.board[row][col] !== -1) {
+                    gameState.board[row][col] = -1;
+                    minesPlaced++;
+                    
+                    // Обновляем счетчики соседей
+                    for (let r = Math.max(0, row - 1); r <= Math.min(config.rows - 1, row + 1); r++) {
+                        for (let c = Math.max(0, col - 1); c <= Math.min(config.cols - 1, col + 1); c++) {
+                            if (gameState.board[r][c] !== -1) {
+                                gameState.board[r][c]++;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Обработка клика по клетке
+        function handleCellClick(row, col) {
+            if (gameState.gameOver || gameState.gameWon || gameState.currentPlayerId !== currentUser.uid) {
+                return;
+            }
+            
+            // Если это первый ход, генерируем мины
+            if (gameState.board.flat().every(cell => cell === 0)) {
+                generateMines(row, col);
+                updateGameState();
+            }
+            
+            if (gameState.flagged[row][col]) {
+                return;
+            }
+            
+            if (gameState.board[row][col] === -1) {
+                // Наступили на мину
+                revealAllMines();
+                gameState.gameOver = true;
+                statusElement.textContent = 'Игра окончена! Вы проиграли.';
+                updateGameState();
+            } else {
+                // Раскрываем клетку
+                revealCell(row, col);
+                if (checkWinCondition()) {
+                    gameState.gameWon = true;
+                    statusElement.textContent = 'Поздравляем! Вы победили!';
+                }
+                updateGameState();
+                switchPlayer();
+            }
+        }
+        
+        // Обработка правого клика по клетке (флаг)
+        function handleCellRightClick(row, col) {
+            if (gameState.gameOver || gameState.gameWon || gameState.currentPlayerId !== currentUser.uid) {
+                return;
+            }
+            
+            if (!gameState.revealed[row][col]) {
+                gameState.flagged[row][col] = !gameState.flagged[row][col];
+                updateCellUI(row, col);
+                updateGameState();
+            }
+        }
+        
+        // Раскрытие клетки
+        function revealCell(row, col) {
+            if (row < 0 || row >= config.rows || col < 0 || col >= config.cols || 
+                gameState.revealed[row][col] || gameState.flagged[row][col]) {
+                return;
+            }
+            
+            gameState.revealed[row][col] = true;
+            updateCellUI(row, col);
+            
+            // Если клетка пустая, раскрываем соседей
+            if (gameState.board[row][col] === 0) {
+                for (let r = row - 1; r <= row + 1; r++) {
+                    for (let c = col - 1; c <= col + 1; c++) {
+                        if (r !== row || c !== col) {
+                            revealCell(r, c);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Раскрытие всех мин (при проигрыше)
+        function revealAllMines() {
+            for (let row = 0; row < config.rows; row++) {
+                for (let col = 0; col < config.cols; col++) {
+                    if (gameState.board[row][col] === -1) {
+                        gameState.revealed[row][col] = true;
+                        updateCellUI(row, col);
+                    }
+                }
+            }
+        }
+        
+        // Проверка условия победы
+        function checkWinCondition() {
+            let allNonMinesRevealed = true;
+            
+            for (let row = 0; row < config.rows; row++) {
+                for (let col = 0; col < config.cols; col++) {
+                    if (gameState.board[row][col] !== -1 && !gameState.revealed[row][col]) {
+                        allNonMinesRevealed = false;
+                        break;
+                    }
+                }
+                if (!allNonMinesRevealed) break;
+            }
+            
+            return allNonMinesRevealed;
+        }
+        
+        // Обновление отображения клетки
+        function updateCellUI(row, col) {
+            const cellIndex = row * config.cols + col;
+            const cellElement = boardElement.children[cellIndex];
+            
+            cellElement.className = 'cell';
+            
+            if (gameState.revealed[row][col]) {
+                cellElement.classList.add('revealed');
+                
+                if (gameState.board[row][col] === -1) {
+                    cellElement.classList.add('mine');
+                    cellElement.innerHTML = createMineSVG();
+                } else if (gameState.board[row][col] > 0) {
+                    cellElement.textContent = gameState.board[row][col];
+                    cellElement.style.color = getNumberColor(gameState.board[row][col]);
+                }
+            } else if (gameState.flagged[row][col]) {
+                cellElement.classList.add('flagged');
+                cellElement.innerHTML = createFlagSVG();
+            }
+        }
+        
+        // Создание SVG изображения мины
+        function createMineSVG() {
+            return `
+                <svg viewBox="0 0 30 30" width="20" height="20">
+                    <circle cx="15" cy="15" r="10" fill="black"/>
+                    <circle cx="15" cy="15" r="6" fill="red"/>
+                    <line x1="5" y1="5" x2="10" y2="10" stroke="black" stroke-width="2"/>
+                    <line x1="20" y1="5" x2="25" y2="10" stroke="black" stroke-width="2"/>
+                    <line x1="5" y1="25" x2="10" y2="20" stroke="black" stroke-width="2"/>
+                    <line x1="25" y1="25" x2="20" y2="20" stroke="black" stroke-width="2"/>
+                </svg>
+            `;
+        }
+        
+        // Создание SVG изображения флага
+        function createFlagSVG() {
+            return `
+                <svg viewBox="0 0 30 30" width="20" height="20">
+                    <rect x="10" y="5" width="2" height="20" fill="black"/>
+                    <polygon points="12,5 12,15 22,10" fill="red"/>
+                </svg>
+            `;
+        }
+        
+        // Получение цвета для числа
+        function getNumberColor(number) {
+            const colors = [
+                '',       // 0 - не отображается
+                '#1976D2', // 1 - синий
+                '#388E3C', // 2 - зеленый
+                '#D32F2F', // 3 - красный
+                '#7B1FA2', // 4 - фиолетовый
+                '#FF8F00', // 5 - оранжевый
+                '#0097A7', // 6 - бирюзовый
+                '#000000', // 7 - черный
+                '#616161'  // 8 - серый
+            ];
+            return colors[number];
+        }
+        
+        // Обновление списка игроков
+        function updatePlayersList() {
+            playersList.innerHTML = '';
+            
+            for (const [id, player] of Object.entries(gameState.players)) {
+                const li = document.createElement('li');
+                const colorIndicator = document.createElement('span');
+                colorIndicator.className = 'color-indicator';
+                colorIndicator.style.backgroundColor = player.color;
+                
+                li.appendChild(colorIndicator);
+                li.appendChild(document.createTextNode(player.name));
+                
+                if (id === gameState.currentPlayerId) {
+                    li.innerHTML += ' (ход)';
+                }
+                
+                if (id === currentUser.uid) {
+                    li.innerHTML += ' (Вы)';
+                }
+                
+                playersList.appendChild(li);
+            }
+        }
+        
+        // Смена текущего игрока
+        function switchPlayer() {
+            const playerIds = Object.keys(gameState.players);
+            if (playerIds.length === 0) return;
+            
+            const currentIndex = playerIds.indexOf(gameState.currentPlayerId);
+            const nextIndex = (currentIndex + 1) % playerIds.length;
+            gameState.currentPlayerId = playerIds[nextIndex];
+            
+            updatePlayersList();
+            statusElement.textContent = gameState.currentPlayerId === currentUser.uid ? 
+                'Ваш ход!' : `Ход игрока ${gameState.players[gameState.currentPlayerId].name}`;
+        }
+        
+        // Обновление состояния игры в Firebase
+        function updateGameState() {
+            if (!gameState.gameId) return;
+            
+            database.ref(`games/${gameState.gameId}`).set({
+                board: gameState.board,
+                revealed: gameState.revealed,
+                flagged: gameState.flagged,
+                gameOver: gameState.gameOver,
+                gameWon: gameState.gameWon,
+                players: gameState.players,
+                currentPlayerId: gameState.currentPlayerId
+            });
+        }
+        
+        // Создание новой игры
+        function createNewGame() {
+            gameState.gameId = 'game_' + Date.now();
+            gameState.players = {
+                [currentUser.uid]: {
+                    name: currentUser.displayName || currentUser.email.split('@')[0],
+                    color: playerColors[0]
+                }
+            };
+            gameState.currentPlayerId = currentUser.uid;
+            
+            // Создаем игру в Firebase
+            updateGameState();
+            
+            // Показываем ID игры для присоединения
+            gameIdInput.value = gameState.gameId;
+            
+            // Инициализируем игру
+            initGame();
+            gameArea.style.display = 'block';
+            statusElement.textContent = 'Ваш ход!';
+            updatePlayersList();
+            
+            // Слушаем изменения в игре
+            database.ref(`games/${gameState.gameId}`).on('value', (snapshot) => {
+                const data = snapshot.val();
+                if (data) {
+                    gameState.board = data.board || gameState.board;
+                    gameState.revealed = data.revealed || gameState.revealed;
+                    gameState.flagged = data.flagged || gameState.flagged;
+                    gameState.gameOver = data.gameOver || false;
+                    gameState.gameWon = data.gameWon || false;
+                    gameState.players = data.players || gameState.players;
+                    gameState.currentPlayerId = data.currentPlayerId || gameState.currentPlayerId;
+                    
+                    // Обновляем UI
+                    updateBoardUI();
+                    updatePlayersList();
+                    
+                    if (gameState.gameOver) {
+                        statusElement.textContent = 'Игра окончена! Вы проиграли.';
+                    } else if (gameState.gameWon) {
+                        statusElement.textContent = 'Поздравляем! Вы победили!';
+                    } else {
+                        statusElement.textContent = gameState.currentPlayerId === currentUser.uid ? 
+                            'Ваш ход!' : `Ход игрока ${gameState.players[gameState.currentPlayerId].name}`;
+                    }
+                }
+            });
+        }
+        
+        // Присоединение к существующей игре
+        function joinGame(gameId) {
+            gameState.gameId = gameId;
+            
+            // Получаем данные игры
+            database.ref(`games/${gameId}`).once('value').then((snapshot) => {
+                const data = snapshot.val();
+                if (!data) {
+                    alert('Игра не найдена!');
+                    return;
+                }
+                
+                // Обновляем состояние
+                gameState.board = data.board || gameState.board;
+                gameState.revealed = data.revealed || gameState.revealed;
+                gameState.flagged = data.flagged || gameState.flagged;
+                gameState.gameOver = data.gameOver || false;
+                gameState.gameWon = data.gameWon || false;
+                gameState.players = data.players || {};
+                gameState.currentPlayerId = data.currentPlayerId || null;
+                
+                // Добавляем текущего пользователя в игру
+                if (!gameState.players[currentUser.uid]) {
+                    const playerCount = Object.keys(gameState.players).length;
+                    gameState.players[currentUser.uid] = {
+                        name: currentUser.displayName || currentUser.email.split('@')[0],
+                        color: playerColors[playerCount % playerColors.length]
+                    };
+                    updateGameState();
+                }
+                
+                // Инициализируем игру
+                initGame();
+                gameArea.style.display = 'block';
+                updateBoardUI();
+                updatePlayersList();
+                
+                if (gameState.gameOver) {
+                    statusElement.textContent = 'Игра окончена! Вы проиграли.';
+                } else if (gameState.gameWon) {
+                    statusElement.textContent = 'Поздравляем! Вы победили!';
+                } else {
+                    statusElement.textContent = gameState.currentPlayerId === currentUser.uid ? 
+                        'Ваш ход!' : `Ход игрока ${gameState.players[gameState.currentPlayerId].name}`;
+                }
+                
+                // Слушаем изменения в игре
+                database.ref(`games/${gameId}`).on('value', (snapshot) => {
+                    const data = snapshot.val();
+                    if (data) {
+                        gameState.board = data.board || gameState.board;
+                        gameState.revealed = data.revealed || gameState.revealed;
+                        gameState.flagged = data.flagged || gameState.flagged;
+                        gameState.gameOver = data.gameOver || false;
+                        gameState.gameWon = data.gameWon || false;
+                        gameState.players = data.players || gameState.players;
+                        gameState.currentPlayerId = data.currentPlayerId || gameState.currentPlayerId;
+                        
+                        // Обновляем UI
+                        updateBoardUI();
+                        updatePlayersList();
+                        
+                        if (gameState.gameOver) {
+                            statusElement.textContent = 'Игра окончена! Вы проиграли.';
+                        } else if (gameState.gameWon) {
+                            statusElement.textContent = 'Поздравляем! Вы победили!';
+                        } else {
+                            statusElement.textContent = gameState.currentPlayerId === currentUser.uid ? 
+                                'Ваш ход!' : `Ход игрока ${gameState.players[gameState.currentPlayerId].name}`;
+                        }
+                    }
+                });
+            });
+        }
+        
+        // Обновление всей доски
+        function updateBoardUI() {
+            for (let row = 0; row < config.rows; row++) {
+                for (let col = 0; col < config.cols; col++) {
+                    updateCellUI(row, col);
+                }
+            }
+        }
+        
+        // Обработчики кнопок
+        loginBtn.addEventListener('click', () => {
+            const email = emailInput.value;
+            const password = passwordInput.value;
+            
+            auth.signInWithEmailAndPassword(email, password)
+                .then((userCredential) => {
+                    currentUser = userCredential.user;
+                    authStatus.textContent = 'Вход выполнен успешно!';
+                    authStatus.style.color = 'green';
+                })
+                .catch((error) => {
+                    authStatus.textContent = 'Ошибка входа: ' + error.message;
+                    authStatus.style.color = 'red';
+                });
+        });
+        
+        signupBtn.addEventListener('click', () => {
+            const email = emailInput.value;
+            const password = passwordInput.value;
+            
+            auth.createUserWithEmailAndPassword(email, password)
+                .then((userCredential) => {
+                    currentUser = userCredential.user;
+                    authStatus.textContent = 'Регистрация успешна!';
+                    authStatus.style.color = 'green';
+                })
+                .catch((error) => {
+                    authStatus.textContent = 'Ошибка регистрации: ' + error.message;
+                    authStatus.style.color = 'red';
+                });
+        });
+        
+        createGameBtn.addEventListener('click', () => {
+            if (!currentUser) {
+                authStatus.textContent = 'Сначала войдите в систему!';
+                authStatus.style.color = 'red';
+                return;
+            }
+            createNewGame();
+        });
+        
+        joinGameBtn.addEventListener('click', () => {
+            if (!currentUser) {
+                authStatus.textContent = 'Сначала войдите в систему!';
+                authStatus.style.color = 'red';
+                return;
+            }
+            
+            const gameId = gameIdInput.value.trim();
+            if (gameId) {
+                joinGame(gameId);
+            } else {
+                authStatus.textContent = 'Введите ID игры!';
+                authStatus.style.color = 'red';
+            }
+        });
+        
+        newGameBtn.addEventListener('click', () => {
+            if (!gameState.gameId) return;
+            
+            // Сброс состояния игры
+            gameState.board = Array(config.rows).fill().map(() => Array(config.cols).fill(0));
+            gameState.revealed = Array(config.rows).fill().map(() => Array(config.cols).fill(false));
+            gameState.flagged = Array(config.rows).fill().map(() => Array(config.cols).fill(false));
+            gameState.gameOver = false;
+            gameState.gameWon = false;
+            
+            // Первый ход - создатель игры
+            gameState.currentPlayerId = Object.keys(gameState.players)[0];
+            
+            updateGameState();
+            initGame();
+            statusElement.textContent = gameState.currentPlayerId === currentUser.uid ? 
+                'Ваш ход!' : `Ход игрока ${gameState.players[gameState.currentPlayerId].name}`;
+        });
+        
+        // Слушатель состояния аутентификации
+        auth.onAuthStateChanged((user) => {
+            if (user) {
+                currentUser = user;
+                authContainer.style.display = 'none';
+                gameArea.style.display = 'block';
+            } else {
+                currentUser = null;
+                authContainer.style.display = 'block';
+                gameArea.style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>
