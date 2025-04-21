@@ -84,7 +84,7 @@
             border-radius: 50%;
             margin-right: 5px;
         }
-        #auth-container {
+        #nickname-container {
             margin: 20px auto;
             max-width: 300px;
             background-color: #fff;
@@ -108,19 +108,18 @@
 <body>
     <h1>Кооперативный Сапёр</h1>
     
-    <div id="auth-container">
-        <h3>Вход / Регистрация</h3>
-        <input type="email" id="email" placeholder="Email">
-        <input type="password" id="password" placeholder="Пароль">
-        <button id="login-btn">Войти</button>
-        <button id="signup-btn">Зарегистрироваться</button>
-        <div id="auth-status"></div>
+    <div id="nickname-container">
+        <h3>Введите ваш ник</h3>
+        <input type="text" id="nickname" placeholder="Ваш ник" maxlength="20">
+        <button id="set-nickname">Продолжить</button>
+        <div id="nickname-status"></div>
         
-        <h3 style="margin-top: 20px;">Игра</h3>
-        <button id="create-game-btn">Создать игру</button>
-        <div style="margin: 10px 0;">или</div>
-        <input type="text" id="game-id-input" placeholder="ID игры">
-        <button id="join-game-btn">Присоединиться</button>
+        <div id="game-actions" style="display: none; margin-top: 20px;">
+            <button id="create-game-btn">Создать игру</button>
+            <div style="margin: 10px 0;">или</div>
+            <input type="text" id="game-id-input" placeholder="ID игры">
+            <button id="join-game-btn">Присоединиться</button>
+        </div>
     </div>
     
     <div id="game-area" style="display: none;">
@@ -141,24 +140,23 @@
 
     <!-- Firebase SDK -->
     <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-database-compat.js"></script>
 
     <script>
-        // Firebase configuration - ЗАМЕНИТЕ НА СВОЮ КОНФИГУРАЦИЮ
-const firebaseConfig = {
-  apiKey: "AIzaSyC_NY3eXimeD74iU6g8qZE0wsl7yexWThw",
-  authDomain: "ripsweep-1aaaf.firebaseapp.com",
-  databaseURL: "https://ripsweep-1aaaf-default-rtdb.firebaseio.com",
-  projectId: "ripsweep-1aaaf",
-  storageBucket: "ripsweep-1aaaf.firebasestorage.app",
-  messagingSenderId: "600546881732",
-  appId: "1:600546881732:web:e3e8f2c2980c583e3e5991"
+        // Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyC_NY3eXimeD74iU6g8qZE0wsl7yexWThw",
+            authDomain: "ripsweep-1aaaf.firebaseapp.com",
+            databaseURL: "https://ripsweep-1aaaf-default-rtdb.firebaseio.com",
+            projectId: "ripsweep-1aaaf",
+            storageBucket: "ripsweep-1aaaf.firebasestorage.app",
+            messagingSenderId: "600546881732",
+            appId: "1:600546881732:web:e3e8f2c2980c583e3e5991",
+            measurementId: "G-HS9JT49X7R"
         };
 
         // Initialize Firebase
         const app = firebase.initializeApp(firebaseConfig);
-        const auth = firebase.auth();
         const database = firebase.database();
 
         // Конфигурация игры
@@ -181,21 +179,24 @@ const firebaseConfig = {
             gameId: null
         };
         
-        // Текущий пользователь
-        let currentUser = null;
+        // Текущий игрок
+        let currentPlayer = {
+            id: null,
+            name: null,
+            color: null
+        };
         
         // Элементы DOM
-        const authContainer = document.getElementById('auth-container');
+        const nicknameContainer = document.getElementById('nickname-container');
         const gameArea = document.getElementById('game-area');
         const boardElement = document.getElementById('board');
         const statusElement = document.getElementById('status');
         const newGameBtn = document.getElementById('new-game-btn');
         const playersList = document.getElementById('players');
-        const emailInput = document.getElementById('email');
-        const passwordInput = document.getElementById('password');
-        const loginBtn = document.getElementById('login-btn');
-        const signupBtn = document.getElementById('signup-btn');
-        const authStatus = document.getElementById('auth-status');
+        const nicknameInput = document.getElementById('nickname');
+        const setNicknameBtn = document.getElementById('set-nickname');
+        const nicknameStatus = document.getElementById('nickname-status');
+        const gameActions = document.getElementById('game-actions');
         const createGameBtn = document.getElementById('create-game-btn');
         const joinGameBtn = document.getElementById('join-game-btn');
         const gameIdInput = document.getElementById('game-id-input');
@@ -274,7 +275,7 @@ const firebaseConfig = {
         
         // Обработка клика по клетке
         function handleCellClick(row, col) {
-            if (gameState.gameOver || gameState.gameWon || gameState.currentPlayerId !== currentUser.uid) {
+            if (gameState.gameOver || gameState.gameWon || gameState.currentPlayerId !== currentPlayer.id) {
                 return;
             }
             
@@ -308,7 +309,7 @@ const firebaseConfig = {
         
         // Обработка правого клика по клетке (флаг)
         function handleCellRightClick(row, col) {
-            if (gameState.gameOver || gameState.gameWon || gameState.currentPlayerId !== currentUser.uid) {
+            if (gameState.gameOver || gameState.gameWon || gameState.currentPlayerId !== currentPlayer.id) {
                 return;
             }
             
@@ -450,7 +451,7 @@ const firebaseConfig = {
                     li.innerHTML += ' (ход)';
                 }
                 
-                if (id === currentUser.uid) {
+                if (id === currentPlayer.id) {
                     li.innerHTML += ' (Вы)';
                 }
                 
@@ -468,7 +469,7 @@ const firebaseConfig = {
             gameState.currentPlayerId = playerIds[nextIndex];
             
             updatePlayersList();
-            statusElement.textContent = gameState.currentPlayerId === currentUser.uid ? 
+            statusElement.textContent = gameState.currentPlayerId === currentPlayer.id ? 
                 'Ваш ход!' : `Ход игрока ${gameState.players[gameState.currentPlayerId].name}`;
         }
         
@@ -490,13 +491,16 @@ const firebaseConfig = {
         // Создание новой игры
         function createNewGame() {
             gameState.gameId = 'game_' + Date.now();
+            currentPlayer.id = 'player_' + Date.now();
+            currentPlayer.color = playerColors[0];
+            
             gameState.players = {
-                [currentUser.uid]: {
-                    name: currentUser.displayName || currentUser.email.split('@')[0],
-                    color: playerColors[0]
+                [currentPlayer.id]: {
+                    name: currentPlayer.name,
+                    color: currentPlayer.color
                 }
             };
-            gameState.currentPlayerId = currentUser.uid;
+            gameState.currentPlayerId = currentPlayer.id;
             
             // Создаем игру в Firebase
             updateGameState();
@@ -507,6 +511,7 @@ const firebaseConfig = {
             // Инициализируем игру
             initGame();
             gameArea.style.display = 'block';
+            nicknameContainer.style.display = 'none';
             statusElement.textContent = 'Ваш ход!';
             updatePlayersList();
             
@@ -531,7 +536,7 @@ const firebaseConfig = {
                     } else if (gameState.gameWon) {
                         statusElement.textContent = 'Поздравляем! Вы победили!';
                     } else {
-                        statusElement.textContent = gameState.currentPlayerId === currentUser.uid ? 
+                        statusElement.textContent = gameState.currentPlayerId === currentPlayer.id ? 
                             'Ваш ход!' : `Ход игрока ${gameState.players[gameState.currentPlayerId].name}`;
                     }
                 }
@@ -541,12 +546,15 @@ const firebaseConfig = {
         // Присоединение к существующей игре
         function joinGame(gameId) {
             gameState.gameId = gameId;
+            currentPlayer.id = 'player_' + Date.now();
+            currentPlayer.color = playerColors[Object.keys(gameState.players).length % playerColors.length];
             
             // Получаем данные игры
             database.ref(`games/${gameId}`).once('value').then((snapshot) => {
                 const data = snapshot.val();
                 if (!data) {
-                    alert('Игра не найдена!');
+                    nicknameStatus.textContent = 'Игра не найдена!';
+                    nicknameStatus.style.color = 'red';
                     return;
                 }
                 
@@ -559,19 +567,17 @@ const firebaseConfig = {
                 gameState.players = data.players || {};
                 gameState.currentPlayerId = data.currentPlayerId || null;
                 
-                // Добавляем текущего пользователя в игру
-                if (!gameState.players[currentUser.uid]) {
-                    const playerCount = Object.keys(gameState.players).length;
-                    gameState.players[currentUser.uid] = {
-                        name: currentUser.displayName || currentUser.email.split('@')[0],
-                        color: playerColors[playerCount % playerColors.length]
-                    };
-                    updateGameState();
-                }
+                // Добавляем текущего игрока в игру
+                gameState.players[currentPlayer.id] = {
+                    name: currentPlayer.name,
+                    color: currentPlayer.color
+                };
+                updateGameState();
                 
                 // Инициализируем игру
                 initGame();
                 gameArea.style.display = 'block';
+                nicknameContainer.style.display = 'none';
                 updateBoardUI();
                 updatePlayersList();
                 
@@ -580,7 +586,7 @@ const firebaseConfig = {
                 } else if (gameState.gameWon) {
                     statusElement.textContent = 'Поздравляем! Вы победили!';
                 } else {
-                    statusElement.textContent = gameState.currentPlayerId === currentUser.uid ? 
+                    statusElement.textContent = gameState.currentPlayerId === currentPlayer.id ? 
                         'Ваш ход!' : `Ход игрока ${gameState.players[gameState.currentPlayerId].name}`;
                 }
                 
@@ -605,7 +611,7 @@ const firebaseConfig = {
                         } else if (gameState.gameWon) {
                             statusElement.textContent = 'Поздравляем! Вы победили!';
                         } else {
-                            statusElement.textContent = gameState.currentPlayerId === currentUser.uid ? 
+                            statusElement.textContent = gameState.currentPlayerId === currentPlayer.id ? 
                                 'Ваш ход!' : `Ход игрока ${gameState.players[gameState.currentPlayerId].name}`;
                         }
                     }
@@ -623,60 +629,30 @@ const firebaseConfig = {
         }
         
         // Обработчики кнопок
-        loginBtn.addEventListener('click', () => {
-            const email = emailInput.value;
-            const password = passwordInput.value;
+        setNicknameBtn.addEventListener('click', () => {
+            const nickname = nicknameInput.value.trim();
+            if (nickname.length < 2) {
+                nicknameStatus.textContent = 'Ник должен быть не короче 2 символов';
+                nicknameStatus.style.color = 'red';
+                return;
+            }
             
-            auth.signInWithEmailAndPassword(email, password)
-                .then((userCredential) => {
-                    currentUser = userCredential.user;
-                    authStatus.textContent = 'Вход выполнен успешно!';
-                    authStatus.style.color = 'green';
-                })
-                .catch((error) => {
-                    authStatus.textContent = 'Ошибка входа: ' + error.message;
-                    authStatus.style.color = 'red';
-                });
-        });
-        
-        signupBtn.addEventListener('click', () => {
-            const email = emailInput.value;
-            const password = passwordInput.value;
-            
-            auth.createUserWithEmailAndPassword(email, password)
-                .then((userCredential) => {
-                    currentUser = userCredential.user;
-                    authStatus.textContent = 'Регистрация успешна!';
-                    authStatus.style.color = 'green';
-                })
-                .catch((error) => {
-                    authStatus.textContent = 'Ошибка регистрации: ' + error.message;
-                    authStatus.style.color = 'red';
-                });
+            currentPlayer.name = nickname;
+            nicknameStatus.textContent = '';
+            gameActions.style.display = 'block';
         });
         
         createGameBtn.addEventListener('click', () => {
-            if (!currentUser) {
-                authStatus.textContent = 'Сначала войдите в систему!';
-                authStatus.style.color = 'red';
-                return;
-            }
             createNewGame();
         });
         
         joinGameBtn.addEventListener('click', () => {
-            if (!currentUser) {
-                authStatus.textContent = 'Сначала войдите в систему!';
-                authStatus.style.color = 'red';
-                return;
-            }
-            
             const gameId = gameIdInput.value.trim();
             if (gameId) {
                 joinGame(gameId);
             } else {
-                authStatus.textContent = 'Введите ID игры!';
-                authStatus.style.color = 'red';
+                nicknameStatus.textContent = 'Введите ID игры!';
+                nicknameStatus.style.color = 'red';
             }
         });
         
@@ -695,21 +671,8 @@ const firebaseConfig = {
             
             updateGameState();
             initGame();
-            statusElement.textContent = gameState.currentPlayerId === currentUser.uid ? 
+            statusElement.textContent = gameState.currentPlayerId === currentPlayer.id ? 
                 'Ваш ход!' : `Ход игрока ${gameState.players[gameState.currentPlayerId].name}`;
-        });
-        
-        // Слушатель состояния аутентификации
-        auth.onAuthStateChanged((user) => {
-            if (user) {
-                currentUser = user;
-                authContainer.style.display = 'none';
-                gameArea.style.display = 'block';
-            } else {
-                currentUser = null;
-                authContainer.style.display = 'block';
-                gameArea.style.display = 'none';
-            }
         });
     </script>
 </body>
